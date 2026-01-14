@@ -2,7 +2,7 @@
   description = "ghidra-gsk (gsk) - a command line for interfacing with ghidra";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -12,17 +12,11 @@
       nixpkgs,
       flake-utils,
     }:
-    flake-utils.lib.eachSystem
-      [
-        "x86_64-linux"
-        "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
-      ]
+    flake-utils.lib.eachDefaultSystem
       (
         system:
         let
-          pkgs = nixpkgs.legacyPackages.${system};
+           pkgs = import nixpkgs { inherit system; };
         in
         {
           devShells.default = pkgs.mkShell {
