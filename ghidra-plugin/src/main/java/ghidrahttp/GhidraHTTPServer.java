@@ -166,6 +166,9 @@ public class GhidraHTTPServer {
         server.createContext("/set_label", new SetLabelHandler());
         server.createContext("/delete_label", new DeleteLabelHandler());
 
+        // Memory read endpoint
+        server.createContext("/read_memory", new ReadMemoryHandler());
+
         // POST endpoints
         server.createContext("/set_function_prototype", new SetFunctionPrototypeHandler());
         server.createContext("/rename_function_by_address", new RenameFunctionHandler());
@@ -1634,6 +1637,109 @@ public class GhidraHTTPServer {
             namespace = "global";
         }
         return String.format("%s\t%s\t%s", sym.getAddress(), sym.getName(), namespace);
+    }
+
+    // Memory read handler
+
+    private class ReadMemoryHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (program == null) {
+                sendError(exchange, 503, "No program loaded");
+                return;
+            }
+            Map<String, String> params = parseQueryString(exchange.getRequestURI().getQuery());
+
+            String addressStr = params.get("address");
+            String lengthStr = params.get("length");
+
+            if (addressStr == null) {
+                sendError(exchange, 400, "Missing 'address' parameter");
+                return;
+            }
+
+            Address address = parseAddress(addressStr);
+            if (address == null) {
+                sendError(exchange, 400, "Invalid address: " + addressStr);
+                return;
+            }
+
+            int length = 256; // Default length
+            if (lengthStr != null) {
+                try {
+                    length = Integer.parseInt(lengthStr);
+                    if (length <= 0 || length > 65536) {
+                        sendError(exchange, 400, "Length must be between 1 and 65536");
+                        return;
+                    }
+                } catch (NumberFormatException e) {
+                    sendError(exchange, 400, "Invalid length: " + lengthStr);
+                    return;
+                }
+            }
+
+            try {
+                ghidra.program.model.mem.Memory memory = program.getMemory();
+                byte[] bytes = new byte[length];
+                int bytesRead = memory.getBytes(address, bytes);
+
+                if (bytesRead <= 0) {
+                    sendError(exchange, 404, "No memory at address: " + addressStr);
+                    return;
+                }
+
+                String result = formatHexDump(address, bytes, bytesRead);
+                sendResponse(exchange, 200, result);
+            } catch (ghidra.program.model.mem.MemoryAccessException e) {
+                sendError(exchange, 404, "Cannot read memory at: " + addressStr + " - " + e.getMessage());
+            } catch (Exception e) {
+                sendError(exchange, 500, "Failed to read memory: " + e.getMessage());
+            }
+        }
+    }
+
+    private String formatHexDump(Address startAddr, byte[] bytes, int length) {
+        StringBuilder sb = new StringBuilder();
+        int bytesPerLine = 16;
+
+        for (int offset = 0; offset < length; offset += bytesPerLine) {
+            // Calculate current address
+            Address lineAddr = startAddr.add(offset);
+
+            // Address column
+            sb.append(String.format("%s  ", lineAddr));
+
+            // Hex bytes column
+            StringBuilder hexPart = new StringBuilder();
+            StringBuilder asciiPart = new StringBuilder();
+
+            for (int i = 0; i < bytesPerLine; i++) {
+                if (offset + i < length) {
+                    byte b = bytes[offset + i];
+                    hexPart.append(String.format("%02x ", b & 0xFF));
+
+                    // ASCII representation
+                    if (b >= 0x20 && b < 0x7F) {
+                        asciiPart.append((char) b);
+                    } else {
+                        asciiPart.append('.');
+                    }
+                } else {
+                    hexPart.append("   ");
+                    asciiPart.append(' ');
+                }
+
+                // Add extra space after 8 bytes for readability
+                if (i == 7) {
+                    hexPart.append(" ");
+                }
+            }
+
+            sb.append(hexPart);
+            sb.append(" |").append(asciiPart).append("|\n");
+        }
+
+        return sb.toString();
     }
 
     // Helper methods for types and equates

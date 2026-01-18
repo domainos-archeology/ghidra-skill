@@ -46,6 +46,16 @@ ghidra label add 0x401234 inner --local     # Add function-scoped label
 ghidra label delete 0x401234 loop_start     # Remove label
 ```
 
+#### Memory Reading
+```bash
+# Read memory as hex dump (default 256 bytes)
+ghidra read <address>
+
+# Read specific number of bytes
+ghidra read <address> 64
+ghidra read <address> --length 512
+```
+
 #### Cross-References and Search
 ```bash
 # Find references

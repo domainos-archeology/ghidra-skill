@@ -261,6 +261,13 @@ func (c *GhidraClient) DeleteLabel(address, name string) ([]byte, error) {
 	return c.post("/delete_label", data)
 }
 
+// Memory-related methods
+
+// ReadMemory reads bytes from memory at the given address.
+func (c *GhidraClient) ReadMemory(address string, length int) ([]byte, error) {
+	return c.get(fmt.Sprintf("/read_memory?address=%s&length=%d", address, length))
+}
+
 // newClient creates a GhidraClient using the configured server address.
 func newClient() *GhidraClient {
 	return NewGhidraClient(getGhidraServer())
