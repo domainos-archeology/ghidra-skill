@@ -161,6 +161,11 @@ public class GhidraHTTPServer {
         server.createContext("/set_equate", new SetEquateHandler());
         server.createContext("/delete_equate", new DeleteEquateHandler());
 
+        // Label endpoints
+        server.createContext("/list_labels", new ListLabelsHandler());
+        server.createContext("/set_label", new SetLabelHandler());
+        server.createContext("/delete_label", new DeleteLabelHandler());
+
         // POST endpoints
         server.createContext("/set_function_prototype", new SetFunctionPrototypeHandler());
         server.createContext("/rename_function_by_address", new RenameFunctionHandler());
@@ -1439,6 +1444,196 @@ public class GhidraHTTPServer {
                 sendError(exchange, 500, "Failed to delete equate: " + e.getMessage());
             }
         }
+    }
+
+    // Label handlers
+
+    private class ListLabelsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (program == null) {
+                sendError(exchange, 503, "No program loaded");
+                return;
+            }
+            Map<String, String> params = parseQueryString(exchange.getRequestURI().getQuery());
+
+            String addressStr = params.get("address");
+            int limit = 1000;
+            if (params.containsKey("limit")) {
+                try {
+                    limit = Integer.parseInt(params.get("limit"));
+                } catch (NumberFormatException ignored) {}
+            }
+
+            StringBuilder sb = new StringBuilder();
+            SymbolTable symbolTable = program.getSymbolTable();
+            int count = 0;
+
+            if (addressStr != null) {
+                // List labels at specific address
+                Address address = parseAddress(addressStr);
+                if (address == null) {
+                    sendError(exchange, 400, "Invalid address: " + addressStr);
+                    return;
+                }
+                Symbol[] symbols = symbolTable.getSymbols(address);
+                for (Symbol sym : symbols) {
+                    if (sym.getSymbolType() == SymbolType.LABEL) {
+                        sb.append(formatSymbol(sym)).append("\n");
+                        count++;
+                    }
+                }
+            } else {
+                // List all labels
+                SymbolIterator symbols = symbolTable.getSymbolIterator();
+                while (symbols.hasNext() && count < limit) {
+                    Symbol sym = symbols.next();
+                    if (sym.getSymbolType() == SymbolType.LABEL) {
+                        sb.append(formatSymbol(sym)).append("\n");
+                        count++;
+                    }
+                }
+            }
+
+            if (count == 0) {
+                sb.append("No labels found");
+            }
+
+            sendResponse(exchange, 200, sb.toString());
+        }
+    }
+
+    private class SetLabelHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                sendError(exchange, 405, "Method not allowed");
+                return;
+            }
+            if (program == null) {
+                sendError(exchange, 503, "No program loaded");
+                return;
+            }
+
+            Map<String, String> params = parseFormData(exchange);
+            String addressStr = params.get("address");
+            String labelName = params.get("name");
+            String scope = params.get("scope"); // "global" or "local" (function-scoped)
+
+            if (addressStr == null || labelName == null) {
+                sendError(exchange, 400, "Missing required parameters: address, name");
+                return;
+            }
+
+            Address address = parseAddress(addressStr);
+            if (address == null) {
+                sendError(exchange, 400, "Invalid address: " + addressStr);
+                return;
+            }
+
+            try {
+                int txId = program.startTransaction("Set label");
+                try {
+                    SymbolTable symbolTable = program.getSymbolTable();
+                    Namespace namespace = null;
+
+                    // Determine namespace based on scope
+                    if ("local".equalsIgnoreCase(scope)) {
+                        // Find the containing function for local scope
+                        Function func = program.getFunctionManager().getFunctionContaining(address);
+                        if (func != null) {
+                            namespace = func;
+                        }
+                    }
+                    // If namespace is null, it will be global
+
+                    Symbol symbol = symbolTable.createLabel(address, labelName, namespace, SourceType.USER_DEFINED);
+                    program.endTransaction(txId, true);
+
+                    String scopeDesc = namespace != null ? "local to " + namespace.getName() : "global";
+                    sendResponse(exchange, 200, String.format("Label created: %s at %s (%s)", labelName, addressStr, scopeDesc));
+                } catch (Exception e) {
+                    program.endTransaction(txId, false);
+                    throw e;
+                }
+            } catch (Exception e) {
+                sendError(exchange, 500, "Failed to create label: " + e.getMessage());
+            }
+        }
+    }
+
+    private class DeleteLabelHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                sendError(exchange, 405, "Method not allowed");
+                return;
+            }
+            if (program == null) {
+                sendError(exchange, 503, "No program loaded");
+                return;
+            }
+
+            Map<String, String> params = parseFormData(exchange);
+            String addressStr = params.get("address");
+            String labelName = params.get("name");
+
+            if (addressStr == null || labelName == null) {
+                sendError(exchange, 400, "Missing required parameters: address, name");
+                return;
+            }
+
+            Address address = parseAddress(addressStr);
+            if (address == null) {
+                sendError(exchange, 400, "Invalid address: " + addressStr);
+                return;
+            }
+
+            try {
+                int txId = program.startTransaction("Delete label");
+                try {
+                    SymbolTable symbolTable = program.getSymbolTable();
+                    Symbol[] symbols = symbolTable.getSymbols(address);
+                    Symbol toDelete = null;
+
+                    for (Symbol sym : symbols) {
+                        if (sym.getName().equals(labelName) && sym.getSymbolType() == SymbolType.LABEL) {
+                            toDelete = sym;
+                            break;
+                        }
+                    }
+
+                    if (toDelete == null) {
+                        program.endTransaction(txId, false);
+                        sendError(exchange, 404, "Label not found: " + labelName + " at " + addressStr);
+                        return;
+                    }
+
+                    boolean deleted = toDelete.delete();
+                    if (!deleted) {
+                        program.endTransaction(txId, false);
+                        sendError(exchange, 500, "Failed to delete label (may be primary symbol)");
+                        return;
+                    }
+
+                    program.endTransaction(txId, true);
+                    sendResponse(exchange, 200, "Label deleted: " + labelName + " at " + addressStr);
+                } catch (Exception e) {
+                    program.endTransaction(txId, false);
+                    throw e;
+                }
+            } catch (Exception e) {
+                sendError(exchange, 500, "Failed to delete label: " + e.getMessage());
+            }
+        }
+    }
+
+    private String formatSymbol(Symbol sym) {
+        String namespace = sym.getParentNamespace().getName();
+        if ("Global".equals(namespace)) {
+            namespace = "global";
+        }
+        return String.format("%s\t%s\t%s", sym.getAddress(), sym.getName(), namespace);
     }
 
     // Helper methods for types and equates

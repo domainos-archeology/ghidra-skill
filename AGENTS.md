@@ -37,6 +37,13 @@ ghidra prototype <address> <function_signature>
 
 # Change variable types
 ghidra vartype <function_addr> <var_name> <new_type>
+
+# Add/remove labels
+ghidra label list                           # List all labels
+ghidra label list --address 0x401234        # Labels at specific address
+ghidra label add 0x401234 loop_start        # Add global label
+ghidra label add 0x401234 inner --local     # Add function-scoped label
+ghidra label delete 0x401234 loop_start     # Remove label
 ```
 
 #### Cross-References and Search

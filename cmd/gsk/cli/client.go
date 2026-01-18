@@ -231,6 +231,36 @@ func (c *GhidraClient) DeleteEquate(name, address string, operand int) ([]byte, 
 	return c.post("/delete_equate", data)
 }
 
+// Label-related methods
+
+// ListLabels returns all labels in the program, optionally at a specific address.
+func (c *GhidraClient) ListLabels(address string, limit int) ([]byte, error) {
+	endpoint := fmt.Sprintf("/list_labels?limit=%d", limit)
+	if address != "" {
+		endpoint += fmt.Sprintf("&address=%s", address)
+	}
+	return c.get(endpoint)
+}
+
+// SetLabel creates a label at the given address.
+func (c *GhidraClient) SetLabel(address, name, scope string) ([]byte, error) {
+	data := url.Values{}
+	data.Set("address", address)
+	data.Set("name", name)
+	if scope != "" {
+		data.Set("scope", scope)
+	}
+	return c.post("/set_label", data)
+}
+
+// DeleteLabel removes a label at the given address.
+func (c *GhidraClient) DeleteLabel(address, name string) ([]byte, error) {
+	data := url.Values{}
+	data.Set("address", address)
+	data.Set("name", name)
+	return c.post("/delete_label", data)
+}
+
 // newClient creates a GhidraClient using the configured server address.
 func newClient() *GhidraClient {
 	return NewGhidraClient(getGhidraServer())
