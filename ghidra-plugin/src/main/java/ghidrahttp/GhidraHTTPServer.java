@@ -6,7 +6,9 @@ import com.sun.net.httpserver.HttpServer;
 
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
+import ghidra.app.services.DataTypeManagerService;
 import ghidra.app.services.GoToService;
+import ghidra.app.util.cparser.C.CParserUtils;
 import ghidra.framework.model.DomainObjectChangedEvent;
 import ghidra.framework.model.DomainObjectChangeRecord;
 import ghidra.framework.model.DomainObjectListener;
@@ -718,10 +720,11 @@ public class GhidraHTTPServer {
                 int txId = program.startTransaction("Set function prototype");
                 try {
                     // Parse and apply the prototype
+                    ghidra.program.model.listing.FunctionSignature sig = parseSignature(prototype, function);
                     ghidra.app.cmd.function.ApplyFunctionSignatureCmd cmd =
                         new ghidra.app.cmd.function.ApplyFunctionSignatureCmd(
                             function.getEntryPoint(),
-                            parseSignature(prototype, function),
+                            sig,
                             SourceType.USER_DEFINED
                         );
                     cmd.applyTo(program);
@@ -731,17 +734,27 @@ public class GhidraHTTPServer {
                     program.endTransaction(txId, false);
                     throw e;
                 }
+            } catch (ghidra.app.util.cparser.C.ParseException e) {
+                String userMsg = CParserUtils.handleParseProblem(e, prototype);
+                sendError(exchange, 400, "Invalid prototype: " + (userMsg != null ? userMsg : e.getMessage()));
             } catch (Exception e) {
                 sendError(exchange, 500, "Failed to set prototype: " + e.getMessage());
             }
         }
 
-        private ghidra.program.model.listing.FunctionSignature parseSignature(String prototype, Function function) {
-            // Simple signature parsing - in production, use Ghidra's CParser
+        private ghidra.program.model.listing.FunctionSignature parseSignature(String prototype, Function function)
+                throws Exception {
+            // Get DataTypeManagerService from tool for access to open archives
+            DataTypeManagerService dtms = tool.getService(DataTypeManagerService.class);
+
+            // Use CParserUtils with handleExceptions=false to throw instead of showing dialog
             ghidra.program.model.data.FunctionDefinitionDataType sig =
-                new ghidra.program.model.data.FunctionDefinitionDataType(function.getName());
-            // For now, just update the name from the prototype
-            // Full parsing would require CParser integration
+                CParserUtils.parseSignature(dtms, program, prototype, false);
+
+            if (sig == null) {
+                throw new Exception("Failed to parse signature: " + prototype);
+            }
+
             return sig;
         }
     }
