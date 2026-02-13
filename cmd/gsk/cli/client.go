@@ -293,6 +293,42 @@ func (c *GhidraClient) ClearData(address string, length int) ([]byte, error) {
 	return c.post("/clear_data", data)
 }
 
+// Namespace-related methods
+
+// ListNamespaces returns all namespaces in the program.
+func (c *GhidraClient) ListNamespaces(limit int) ([]byte, error) {
+	return c.get(fmt.Sprintf("/list_namespaces?limit=%d", limit))
+}
+
+// Class-related methods
+
+// ListClasses returns all classes in the program.
+func (c *GhidraClient) ListClasses(limit int) ([]byte, error) {
+	return c.get(fmt.Sprintf("/list_classes?limit=%d", limit))
+}
+
+// Import-related methods
+
+// ListImports returns imported (external) symbols in the program.
+func (c *GhidraClient) ListImports(filter string, limit int) ([]byte, error) {
+	endpoint := fmt.Sprintf("/list_imports?limit=%d", limit)
+	if filter != "" {
+		endpoint += fmt.Sprintf("&filter=%s", url.QueryEscape(filter))
+	}
+	return c.get(endpoint)
+}
+
+// Export-related methods
+
+// ListExports returns exported entry points in the program.
+func (c *GhidraClient) ListExports(filter string, limit int) ([]byte, error) {
+	endpoint := fmt.Sprintf("/list_exports?limit=%d", limit)
+	if filter != "" {
+		endpoint += fmt.Sprintf("&filter=%s", url.QueryEscape(filter))
+	}
+	return c.get(endpoint)
+}
+
 // newClient creates a GhidraClient using the configured server address.
 func newClient() *GhidraClient {
 	return NewGhidraClient(getGhidraServer())

@@ -15,6 +15,7 @@ import ghidra.framework.model.DomainObjectListener;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
+import ghidra.program.model.address.AddressIterator;
 import ghidra.program.model.data.*;
 import ghidra.program.model.scalar.Scalar;
 import ghidra.program.model.listing.*;
@@ -167,6 +168,12 @@ public class GhidraHTTPServer {
         server.createContext("/list_labels", new ListLabelsHandler());
         server.createContext("/set_label", new SetLabelHandler());
         server.createContext("/delete_label", new DeleteLabelHandler());
+
+        // Symbol tree endpoints (namespaces, classes, imports, exports)
+        server.createContext("/list_namespaces", new ListNamespacesHandler());
+        server.createContext("/list_classes", new ListClassesHandler());
+        server.createContext("/list_imports", new ListImportsHandler());
+        server.createContext("/list_exports", new ListExportsHandler());
 
         // Memory read endpoint
         server.createContext("/read_memory", new ReadMemoryHandler());
@@ -1655,6 +1662,180 @@ public class GhidraHTTPServer {
             namespace = "global";
         }
         return String.format("%s\t%s\t%s", sym.getAddress(), sym.getName(), namespace);
+    }
+
+    // Namespace handler
+
+    private class ListNamespacesHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (program == null) {
+                sendError(exchange, 503, "No program loaded");
+                return;
+            }
+            Map<String, String> params = parseQueryString(exchange.getRequestURI().getQuery());
+
+            int limit = 1000;
+            if (params.containsKey("limit")) {
+                try {
+                    limit = Integer.parseInt(params.get("limit"));
+                } catch (NumberFormatException ignored) {}
+            }
+
+            StringBuilder sb = new StringBuilder();
+            SymbolTable symbolTable = program.getSymbolTable();
+            SymbolIterator symbols = symbolTable.getSymbolIterator();
+            int count = 0;
+
+            while (symbols.hasNext() && count < limit) {
+                Symbol sym = symbols.next();
+                if (sym.getSymbolType() == SymbolType.NAMESPACE) {
+                    String parent = sym.getParentNamespace().getName();
+                    if ("Global".equals(parent)) {
+                        parent = "global";
+                    }
+                    sb.append(String.format("%s\t%s\n", sym.getName(), parent));
+                    count++;
+                }
+            }
+
+            if (count == 0) {
+                sb.append("No namespaces found");
+            }
+
+            sendResponse(exchange, 200, sb.toString());
+        }
+    }
+
+    // Class handler
+
+    private class ListClassesHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (program == null) {
+                sendError(exchange, 503, "No program loaded");
+                return;
+            }
+            Map<String, String> params = parseQueryString(exchange.getRequestURI().getQuery());
+
+            int limit = 1000;
+            if (params.containsKey("limit")) {
+                try {
+                    limit = Integer.parseInt(params.get("limit"));
+                } catch (NumberFormatException ignored) {}
+            }
+
+            StringBuilder sb = new StringBuilder();
+            SymbolTable symbolTable = program.getSymbolTable();
+            SymbolIterator symbols = symbolTable.getSymbolIterator();
+            int count = 0;
+
+            while (symbols.hasNext() && count < limit) {
+                Symbol sym = symbols.next();
+                if (sym.getSymbolType() == SymbolType.CLASS) {
+                    String parent = sym.getParentNamespace().getName();
+                    if ("Global".equals(parent)) {
+                        parent = "global";
+                    }
+                    sb.append(String.format("%s\t%s\n", sym.getName(), parent));
+                    count++;
+                }
+            }
+
+            if (count == 0) {
+                sb.append("No classes found");
+            }
+
+            sendResponse(exchange, 200, sb.toString());
+        }
+    }
+
+    // Import handler
+
+    private class ListImportsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (program == null) {
+                sendError(exchange, 503, "No program loaded");
+                return;
+            }
+            Map<String, String> params = parseQueryString(exchange.getRequestURI().getQuery());
+
+            int limit = 1000;
+            if (params.containsKey("limit")) {
+                try {
+                    limit = Integer.parseInt(params.get("limit"));
+                } catch (NumberFormatException ignored) {}
+            }
+
+            String filter = params.get("filter");
+
+            StringBuilder sb = new StringBuilder();
+            SymbolTable symbolTable = program.getSymbolTable();
+            SymbolIterator symbols = symbolTable.getExternalSymbols();
+            int count = 0;
+
+            while (symbols.hasNext() && count < limit) {
+                Symbol sym = symbols.next();
+                String name = sym.getName();
+                if (filter != null && !name.toLowerCase().contains(filter.toLowerCase())) {
+                    continue;
+                }
+                String library = sym.getParentNamespace().getName();
+                sb.append(String.format("%s\t%s\t%s\n", sym.getAddress(), name, library));
+                count++;
+            }
+
+            if (count == 0) {
+                sb.append("No imports found");
+            }
+
+            sendResponse(exchange, 200, sb.toString());
+        }
+    }
+
+    // Export handler
+
+    private class ListExportsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (program == null) {
+                sendError(exchange, 503, "No program loaded");
+                return;
+            }
+            Map<String, String> params = parseQueryString(exchange.getRequestURI().getQuery());
+
+            int limit = 1000;
+            if (params.containsKey("limit")) {
+                try {
+                    limit = Integer.parseInt(params.get("limit"));
+                } catch (NumberFormatException ignored) {}
+            }
+
+            String filter = params.get("filter");
+
+            StringBuilder sb = new StringBuilder();
+            SymbolTable symbolTable = program.getSymbolTable();
+            AddressIterator entryPoints = symbolTable.getExternalEntryPointIterator();
+            int count = 0;
+
+            while (entryPoints.hasNext() && count < limit) {
+                Address addr = entryPoints.next();
+                Symbol sym = symbolTable.getPrimarySymbol(addr);
+                String name = (sym != null) ? sym.getName() : addr.toString();
+                if (filter != null && !name.toLowerCase().contains(filter.toLowerCase())) {
+                    continue;
+                }
+                sb.append(String.format("%s\t%s\n", addr, name));
+                count++;
+            }
+
+            if (count == 0) {
+                sb.append("No exports found");
+            }
+
+            sendResponse(exchange, 200, sb.toString());
+        }
     }
 
     // Memory read handler
